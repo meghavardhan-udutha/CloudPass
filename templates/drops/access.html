@@ -120,47 +120,90 @@
         headers: headers,
         body: body,
       })
-        .then(function (r) { return r.json().then(function (d) { return { status: r.status, data: d }; }); })
+        .then(function (response) {
+
+          if (!response.ok && response.status !== 403 &&
+            response.status !== 410) {
+            throw new Error('Request failed');
+          }
+
+          return response.json().then(function (data) {
+            return {
+              status: response.status,
+              data: data
+            };
+          });
+        })
         .then(function (res) {
+
           accessBtn.textContent = 'Retrieve';
           accessBtn.disabled = false;
 
-          if (res.status === 200 && res.data.password_required) {
+          // clear old error on success
+          accessError.style.display = 'none';
+
+          if (res.status === 200 &&
+            res.data.password_required) {
+
             passwordRequired = true;
             currentCode = code;
+
             passwordGate.classList.add('visible');
             dropPasswordInput.focus();
             return;
           }
 
           if (res.status === 403) {
-            showError(res.data.error || 'Incorrect password.');
+            showError(
+              res.data.error ||
+              'Incorrect password.'
+            );
             return;
           }
 
           if (res.status === 410) {
-            showError('This drop has expired.');
+            showError(
+              'This drop has expired.'
+            );
             return;
           }
 
           if (res.status !== 200) {
-            showError(res.data.error || 'Drop not found.');
+            showError(
+              res.data.error ||
+              'Drop not found.'
+            );
             return;
           }
 
-          // Success
-          passwordGate.classList.remove('visible');
-          currentCode = code;
+          // SUCCESS
           renderDrop(res.data);
         })
-        .catch(function () {
+        .catch(function (error) {
+
+          console.error(error);
+
           accessBtn.textContent = 'Retrieve';
           accessBtn.disabled = false;
-          showError('Network error — please try again.');
+
+          // show network error only if drop not loaded
+          if (!dropInfo.classList.contains('visible')) {
+            showError(
+              'Network error — please try again.'
+            );
+          }
         });
     }
 
     function renderDrop(data) {
+      // clear error message
+      accessError.style.display = 'none';
+      accessError.textContent = '';
+
+      // hide password box if previously opened
+      passwordGate.classList.remove('visible');
+
+      document.getElementById('dropTitle').textContent = data.code;
       document.getElementById('dropTitle').textContent = data.code;
       document.getElementById('dropMeta').textContent =
         data.file_count + ' file' + (data.file_count !== 1 ? 's' : '') +
