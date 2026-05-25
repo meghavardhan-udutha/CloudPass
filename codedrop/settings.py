@@ -64,21 +64,52 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'codedrop.wsgi.application'
 
-# Database — MySQL via DATABASE_URL env var
-DATABASE_URL = config('DATABASE_URL', default=None)
+# ==========================
+# Database
+# Local -> MySQL
+# Render -> PostgreSQL
+# ==========================
+
+DATABASE_URL = config(
+    'DATABASE_URL',
+    default=None
+)
+
 if DATABASE_URL:
+    # Production (Render PostgreSQL)
     DATABASES = {
-        'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600)
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=True
+        )
     }
+
 else:
+    # Local Development (MySQL)
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.mysql',
-            'NAME': config('DB_NAME', default='codedrop'),
-            'USER': config('DB_USER', default='root'),
-            'PASSWORD': config('DB_PASSWORD', default=''),
-            'HOST': config('DB_HOST', default='localhost'),
-            'PORT': config('DB_PORT', default='3306'),
+            'NAME': config(
+                'DB_NAME',
+                default='codedrop'
+            ),
+            'USER': config(
+                'DB_USER',
+                default='root'
+            ),
+            'PASSWORD': config(
+                'DB_PASSWORD',
+                default=''
+            ),
+            'HOST': config(
+                'DB_HOST',
+                default='localhost'
+            ),
+            'PORT': config(
+                'DB_PORT',
+                default='3306'
+            ),
             'OPTIONS': {
                 'charset': 'utf8mb4',
             },
