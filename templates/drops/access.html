@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Cloud Pass — Retrieve Files{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="access-form-wrap">
+
+    <h1 class="page-title">Retrieve files.</h1>
+    <p class="page-subtitle">Enter your access code to preview and download files.</p>
+
+    <div class="card">
+      <div class="form-group">
+        <label for="codeInput">Access code</label>
+        <input type="text" id="codeInput" class="code-input-large" placeholder="BLUE-HAWK-33" maxlength="64"
+          autocomplete="off" spellcheck="false" value="{{ prefill_code }}" />
+      </div>
+
+      <!-- Password gate (shown if drop is protected) -->
+      <div class="password-gate" id="passwordGate">
+        <div class="password-gate__icon">🔒</div>
+        <p class="password-gate__text">This drop is password protected.</p>
+        <div class="form-group">
+          <input type="password" id="dropPasswordInput" placeholder="Enter password" autocomplete="current-password" />
+        </div>
+      </div>
+
+      <div id="accessError" class="alert alert--error" style="display:none; margin-top: 12px;"></div>
+
+      <div style="margin-top: 16px;">
+        <button class="btn btn--primary btn--full" id="accessBtn">
+          Retrieve
+        </button>
+      </div>
+    </div>
+
+  </div><!-- /.access-form-wrap -->
+
+  <!-- Drop Info & File Grid -->
+  <div class="drop-info" id="dropInfo">
+    <div class="drop-info__header">
+      <div>
+        <div class="drop-info__title" id="dropTitle">Files</div>
+        <div class="drop-info__meta" id="dropMeta"></div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <span id="expiryBadge"></span>
+        <!-- <button class="btn btn--primary" id="downloadAllBtn">
+          ⬇ Download all (.zip)
+        </button> -->
+      </div>
+    </div>
+
+    <div class="file-grid" id="fileGrid"></div>
+  </div>
+
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox">
+  <div class="lightbox__inner" id="lightboxInner">
+    <button class="lightbox__close" id="lightboxClose">✕</button>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    var codeInput = document.getElementById('codeInput');
+    var accessBtn = document.getElementById('accessBtn');
+    var accessError = document.getElementById('accessError');
+    var passwordGate = document.getElementById('passwordGate');
+    var dropPasswordInput = document.getElementById('dropPasswordInput');
+    var dropInfo = document.getElementById('dropInfo');
+    var fileGrid = document.getElementById('fileGrid');
+    var downloadAllBtn = document.getElementById('downloadAllBtn');
+    var lightbox = document.getElementById('lightbox');
+    var lightboxInner = document.getElementById('lightboxInner');
+
+    var currentCode = null;
+    var passwordRequired = false;
+
+    // Auto-trigger if prefilled code
+    if (codeInput.value.trim()) {
+      setTimeout(function () { doAccess(); }, 100);
+    }
+
+    codeInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doAccess();
+    });
+    dropPasswordInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') doAccess();
+    });
+    accessBtn.addEventListener('click', doAccess);
+
+    function doAccess() {
+      var code = codeInput.value.trim().toUpperCase();
+      if (!code) return;
+
+      accessError.style.display = 'none';
+      accessBtn.textContent = 'Loading…';
+      accessBtn.disabled = true;
+
+      var method = 'GET';
+      var body = null;
+      var headers = {};
+
+      if (passwordRequired) {
+        method = 'POST';
+        body = JSON.stringify({ password: dropPasswordInput.value });
+        headers['Content-Type'] = 'application/json';
+        headers['X-CSRFToken'] = getCookie('csrftoken');
+      }
+
+      fetch('/api/access/' + encodeURIComponent(code) + '/', {
+        method: method,
+        headers: headers,
+        body: body,
+      })
+        .then(function (r) { return r.json().then(function (d) { return { status: r.status, data: d }; }); })
+        .then(function (res) {
+          accessBtn.textContent = 'Retrieve';
+          accessBtn.disabled = false;
+
+          if (res.status === 200 && res.data.password_required) {
+            passwordRequired = true;
+            currentCode = code;
+            passwordGate.classList.add('visible');
+            dropPasswordInput.focus();
+            return;
+          }
+
+          if (res.status === 403) {
+            showError(res.data.error || 'Incorrect password.');
+            return;
+          }
+
+          if (res.status === 410) {
+            showError('This drop has expired.');
+            return;
+          }
+
+          if (res.status !== 200) {
+            showError(res.data.error || 'Drop not found.');
+            return;
+          }
+
+          // Success
+          passwordGate.classList.remove('visible');
+          currentCode = code;
+          renderDrop(res.data);
+        })
+        .catch(function () {
+          accessBtn.textContent = 'Retrieve';
+          accessBtn.disabled = false;
+          showError('Network error — please try again.');
+        });
+    }
+
+    function renderDrop(data) {
+      document.getElementById('dropTitle').textContent = data.code;
+      document.getElementById('dropMeta').textContent =
+        data.file_count + ' file' + (data.file_count !== 1 ? 's' : '') +
+        (data.password_protected ? '  ·  🔒 Protected' : '');
+
+      if (data.expires_at) {
+        var exp = new Date(data.expires_at);
+        var now = new Date();
+        var diffDays = Math.round((exp - now) / 86400000);
+        var badge = document.getElementById('expiryBadge');
+        badge.className = 'badge badge--warning';
+        badge.textContent = 'Expires in ' + (diffDays > 0 ? diffDays + 'd' : 'soon');
+      }
+
+      fileGrid.innerHTML = '';
+      data.files.forEach(function (f) {
+        fileGrid.appendChild(buildFileCard(f, data));
+      });
+
+      dropInfo.classList.add('visible');
+      dropInfo.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      downloadAllBtn.onclick = function () {
+        var pw = passwordRequired ? '?password=' + encodeURIComponent(dropPasswordInput.value) : '';
+        window.location.href = '/download/' + encodeURIComponent(data.code) + '/' + pw;
+      };
+    }
+
+    function buildFileCard(f, dropData) {
+      var card = document.createElement('div');
+      card.className = 'file-card';
+
+      var preview = document.createElement('div');
+      preview.className = 'file-card__preview';
+
+      if (f.file_type === 'image') {
+        var img = document.createElement('img');
+        img.src = f.url;
+        img.alt = f.filename;
+        img.loading = 'lazy';
+        preview.appendChild(img);
+        preview.addEventListener('click', function () { openLightboxImage(f.url, f.filename); });
+      } else if (f.file_type === 'video') {
+        var vid = document.createElement('video');
+        vid.src = f.url;
+        vid.muted = true;
+        vid.preload = 'metadata';
+        preview.appendChild(vid);
+        preview.addEventListener('click', function () { openLightboxVideo(f.url, f.filename); });
+      } else if (f.file_type === 'pdf') {
+        var pdfWrap = document.createElement('div');
+        pdfWrap.className = 'pdf-preview-wrap';
+        var iframe = document.createElement('iframe');
+        iframe.src = f.url;
+        iframe.title = f.filename;
+        pdfWrap.appendChild(iframe);
+        preview.appendChild(pdfWrap);
+        preview.style.cursor = 'pointer';
+        preview.addEventListener('click', function () { window.open(f.url, '_blank'); });
+      } else {
+        var icon = document.createElement('span');
+        icon.className = 'file-icon';
+        icon.textContent = fileIcon(f.filename);
+        preview.appendChild(icon);
+      }
+
+      var body = document.createElement('div');
+      body.className = 'file-card__body';
+      body.innerHTML =
+        '<div class="file-card__name" title="' + escHtml(f.filename) + '">' + escHtml(f.filename) + '</div>' +
+        '<div class="file-card__meta"><span>' + escHtml(f.file_type) + '</span><span>' + escHtml(f.size) + '</span></div>';
+
+      var actions = document.createElement('div');
+      actions.className = 'file-card__actions';
+
+      var dl = document.createElement('a');
+
+      dl.href =
+        '/api/access/' +
+        encodeURIComponent(dropData.code) +
+        '/download/' +
+        encodeURIComponent(f.id) +
+        '/';
+
+      dl.textContent = '↓ Download';
+
+      actions.appendChild(dl);
+
+      card.appendChild(preview);
+      card.appendChild(body);
+      card.appendChild(actions);
+      return card;
+    }
+
+    function openLightboxImage(url, name) {
+      var closeBtn = lightboxInner.querySelector('.lightbox__close');
+      lightboxInner.innerHTML = '';
+      lightboxInner.appendChild(closeBtn || makeLightboxClose());
+      var img = document.createElement('img');
+      img.src = url;
+      img.alt = name;
+      lightboxInner.appendChild(img);
+      lightbox.classList.add('open');
+    }
+
+    function openLightboxVideo(url, name) {
+      var closeBtn = lightboxInner.querySelector('.lightbox__close') || makeLightboxClose();
+      lightboxInner.innerHTML = '';
+      lightboxInner.appendChild(closeBtn);
+      var vid = document.createElement('video');
+      vid.src = url;
+      vid.controls = true;
+      vid.autoplay = true;
+      lightboxInner.appendChild(vid);
+      lightbox.classList.add('open');
+    }
+
+    function makeLightboxClose() {
+      var btn = document.createElement('button');
+      btn.className = 'lightbox__close';
+      btn.id = 'lightboxClose';
+      btn.textContent = '✕';
+      btn.addEventListener('click', closeLightbox);
+      return btn;
+    }
+
+    document.getElementById('lightboxClose').addEventListener('click', closeLightbox);
+    lightbox.addEventListener('click', function (e) {
+      if (e.target === lightbox) closeLightbox();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeLightbox();
+    });
+
+    function closeLightbox() {
+      lightbox.classList.remove('open');
+      var vid = lightboxInner.querySelector('video');
+      if (vid) vid.pause();
+    }
+
+    function showError(msg) {
+      accessError.textContent = '⚠ ' + msg;
+      accessError.style.display = 'flex';
+    }
+
+    function escHtml(str) {
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function fileIcon(name) {
+      var ext = (name.split('.').pop() || '').toLowerCase();
+      var imgs = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'];
+      var vids = ['mp4', 'webm', 'mov', 'avi', 'mkv'];
+      var zips = ['zip', 'tar', 'gz', 'rar', '7z'];
+      if (imgs.includes(ext)) return '🖼️';
+      if (vids.includes(ext)) return '🎬';
+      if (ext === 'pdf') return '📄';
+      if (zips.includes(ext)) return '🗜️';
+      if (['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'].includes(ext)) return '📝';
+      return '📎';
+    }
+
+    function getCookie(name) {
+      var val = '; ' + document.cookie;
+      var parts = val.split('; ' + name + '=');
+      if (parts.length === 2) return parts.pop().split(';').shift();
+      return '';
+    }
+  })();
+</script>
+{% endblock %}

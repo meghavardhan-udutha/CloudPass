@@ -1,0 +1,316 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Cloud Pass — Share Files Instantly{% endblock %}
+
+{% block content %}
+<div class="container">
+
+  <!-- Upload Form -->
+  <div id="uploadSection">
+    <h1 class="page-title">Drop your files.</h1>
+    <p class="page-subtitle">Upload files and get a short code. Anyone with the code can download them instantly.</p>
+
+    <div class="card">
+
+      <!-- Drop Zone -->
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="fileInput" multiple />
+        <span class="dropzone__icon">📁</span>
+        <p class="dropzone__title">Drag &amp; drop files here</p>
+        <p class="dropzone__sub">or click to browse — all file types supported</p>
+      </div>
+
+      <!-- Selected Files List -->
+      <div class="file-list" id="fileList"></div>
+
+      <!-- Options -->
+      <div class="form-section">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="passwordInput">
+              Password <span class="label-optional">(optional)</span>
+            </label>
+            <input type="password" id="passwordInput" placeholder="Protect with a password"
+              autocomplete="new-password" />
+          </div>
+          <div class="form-group">
+            <label for="vanityCodeInput">
+              Custom code <span class="label-optional">(optional)</span>
+            </label>
+            <input type="text" id="vanityCodeInput" placeholder="e.g. RESUME-2026" maxlength="32" autocomplete="off"
+              style="text-transform: uppercase;" />
+          </div>
+          <div class="form-group">
+            <label for="expiryInput">
+              Expiry
+            </label>
+
+            <select id="expiryInput">
+              <option value="1">1 Day</option>
+              <option value="3">3 Days</option>
+              <option value="7" selected>7 Days</option>
+              <option value="30">30 Days</option>
+              <option value="0">Never Expire</option>
+            </select>
+          </div>
+        </div>
+        <p class="field-hint">Leave custom code blank to auto-generate one like <strong>BLUE-HAWK-33</strong>.</p>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-label">
+          <span id="progressText">Uploading…</span>
+          <span id="progressPct">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-bar__fill" id="progressFill"></div>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div id="uploadError" class="alert alert--error" style="display:none; margin-top:16px;"></div>
+
+      <!-- Upload Button -->
+      <div style="margin-top: 24px;">
+        <button class="btn btn--primary btn--full btn--lg" id="uploadBtn" disabled>
+          Upload Files
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Success Panel (shown after upload) -->
+  <div class="success-panel" id="successPanel">
+    <div class="success-panel__label">✓ Upload complete</div>
+
+    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 4px;">
+      <div class="access-code-display" id="resultCode"></div>
+      <button class="copy-btn" id="copyCodeBtn">copy</button>
+    </div>
+    <div class="access-code-url" id="resultUrl"></div>
+
+    <div class="qr-wrap">
+      <img id="qrImage" src="" alt="QR Code" />
+    </div>
+
+    <div id="resultFileCount" style="font-size:0.875rem; color:var(--text2); margin-bottom: 20px;"></div>
+
+    <div class="success-actions">
+      <a class="btn btn--primary" id="goToAccessBtn" href="#">View &amp; Download</a>
+      <button class="btn btn--ghost" id="uploadAnotherBtn">Upload another</button>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    var dropzone = document.getElementById('dropzone');
+    var fileInput = document.getElementById('fileInput');
+    var fileList = document.getElementById('fileList');
+    var uploadBtn = document.getElementById('uploadBtn');
+    var progressWrap = document.getElementById('progressWrap');
+    var progressFill = document.getElementById('progressFill');
+    var progressText = document.getElementById('progressText');
+    var progressPct = document.getElementById('progressPct');
+    var uploadError = document.getElementById('uploadError');
+    var uploadSection = document.getElementById('uploadSection');
+    var successPanel = document.getElementById('successPanel');
+
+    var selectedFiles = [];
+
+    // Drag-and-drop events
+    dropzone.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      dropzone.classList.add('drag-over');
+    });
+    dropzone.addEventListener('dragleave', function () {
+      dropzone.classList.remove('drag-over');
+    });
+    dropzone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+      addFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', function () {
+      addFiles(fileInput.files);
+      fileInput.value = '';
+    });
+
+    function fileIcon(name) {
+      var ext = (name.split('.').pop() || '').toLowerCase();
+      var imgs = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
+      var vids = ['mp4', 'webm', 'mov', 'avi', 'mkv'];
+      var docs = ['pdf'];
+      var zips = ['zip', 'tar', 'gz', 'rar', '7z'];
+      var word = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'];
+      if (imgs.includes(ext)) return '🖼️';
+      if (vids.includes(ext)) return '🎬';
+      if (docs.includes(ext)) return '📄';
+      if (zips.includes(ext)) return '🗜️';
+      if (word.includes(ext)) return '📝';
+      return '📎';
+    }
+
+    function formatSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+      return (bytes / 1073741824).toFixed(1) + ' GB';
+    }
+
+    function addFiles(fileObjs) {
+      for (var i = 0; i < fileObjs.length; i++) {
+        selectedFiles.push(fileObjs[i]);
+      }
+      renderFileList();
+    }
+
+    function renderFileList() {
+      fileList.innerHTML = '';
+      selectedFiles.forEach(function (f, idx) {
+        var div = document.createElement('div');
+        div.className = 'file-item';
+        div.innerHTML =
+          '<span class="file-item__icon">' + fileIcon(f.name) + '</span>' +
+          '<span class="file-item__name" title="' + escHtml(f.name) + '">' + escHtml(f.name) + '</span>' +
+          '<span class="file-item__size">' + formatSize(f.size) + '</span>' +
+          '<button class="file-item__remove" data-idx="' + idx + '" title="Remove">✕</button>';
+        fileList.appendChild(div);
+      });
+      fileList.querySelectorAll('.file-item__remove').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          selectedFiles.splice(parseInt(btn.dataset.idx), 1);
+          renderFileList();
+        });
+      });
+      uploadBtn.disabled = selectedFiles.length === 0;
+    }
+
+    function escHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    uploadBtn.addEventListener('click', doUpload);
+
+    function doUpload() {
+      if (selectedFiles.length === 0) return;
+      uploadError.style.display = 'none';
+
+      var fd = new FormData();
+      selectedFiles.forEach(function (f) { fd.append('files', f); });
+
+      var pw = document.getElementById('passwordInput').value.trim();
+      var vc = document.getElementById('vanityCodeInput').value.trim();
+      var expiry =
+        document.getElementById('expiryInput').value;
+      if (pw) fd.append('password', pw);
+      if (vc) fd.append('vanity_code', vc);
+      fd.append('expiry', expiry);
+
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = 'Uploading…';
+      progressWrap.classList.add('active');
+      progressFill.style.width = '0%';
+      progressText.textContent = 'Uploading…';
+      progressPct.textContent = '0%';
+
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/upload/', true);
+
+      xhr.upload.addEventListener('progress', function (e) {
+        if (e.lengthComputable) {
+          var pct = Math.round((e.loaded / e.total) * 90);
+          progressFill.style.width = pct + '%';
+          progressPct.textContent = pct + '%';
+        }
+      });
+
+      xhr.addEventListener('load', function () {
+        progressFill.style.width = '100%';
+        progressPct.textContent = '100%';
+        progressText.textContent = 'Processing…';
+
+        if (xhr.status === 201) {
+          var data = JSON.parse(xhr.responseText);
+          showSuccess(data);
+        } else {
+          var err = 'Upload failed.';
+          try { err = JSON.parse(xhr.responseText).error || err; } catch (e) { }
+          showError(err);
+          uploadBtn.disabled = false;
+          uploadBtn.textContent = 'Upload Files';
+          progressWrap.classList.remove('active');
+        }
+      });
+
+      xhr.addEventListener('error', function () {
+        showError('Network error — please try again.');
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = 'Upload Files';
+        progressWrap.classList.remove('active');
+      });
+
+      // CSRF
+      xhr.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
+      xhr.send(fd);
+    }
+
+    function showSuccess(data) {
+      uploadSection.style.display = 'none';
+      successPanel.classList.add('visible');
+
+      document.getElementById('resultCode').textContent = data.code;
+      document.getElementById('resultUrl').textContent = data.access_url;
+      document.getElementById('qrImage').src = data.qr_code;
+      document.getElementById('goToAccessBtn').href = '/access/' + data.code + '/';
+
+      var fc = data.files.length;
+      document.getElementById('resultFileCount').textContent =
+        fc + ' file' + (fc !== 1 ? 's' : '') + ' uploaded' +
+        (data.password_protected ? ' · 🔒 Password protected' : '');
+    }
+
+    function showError(msg) {
+      uploadError.textContent = '⚠ ' + msg;
+      uploadError.style.display = 'flex';
+    }
+
+    // Copy code button
+    document.getElementById('copyCodeBtn').addEventListener('click', function () {
+      var code = document.getElementById('resultCode').textContent;
+      navigator.clipboard.writeText(code).then(function () {
+        var btn = document.getElementById('copyCodeBtn');
+        btn.textContent = 'copied!';
+        btn.classList.add('copied');
+        setTimeout(function () { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+      });
+    });
+
+    // Upload another
+    document.getElementById('uploadAnotherBtn').addEventListener('click', function () {
+      successPanel.classList.remove('visible');
+      uploadSection.style.display = 'block';
+      selectedFiles = [];
+      renderFileList();
+      document.getElementById('passwordInput').value = '';
+      document.getElementById('vanityCodeInput').value = '';
+      uploadBtn.textContent = 'Upload Files';
+      progressWrap.classList.remove('active');
+      uploadError.style.display = 'none';
+    });
+
+    function getCookie(name) {
+      var val = '; ' + document.cookie;
+      var parts = val.split('; ' + name + '=');
+      if (parts.length === 2) return parts.pop().split(';').shift();
+      return '';
+    }
+  })();
+</script>
+{% endblock %}

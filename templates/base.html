@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Cloud Pass{% endblock %}</title>
+  <meta name="description" content="Share files instantly with a short access code. No login needed." />
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'css/main.css' %}" />
+  <link rel="icon" type="image/png" href="{% static 'images/favicon.png' %}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+<header class="header">
+  <a href="/" class="header__logo">
+    <!-- Cloud<span>Pass</span> -->
+    {% load static %}
+    <img src="{% static 'images/main.png' %}" alt="" style="height: 173px; margin-top: 17px;">
+  </a>
+  <nav class="header__nav">
+    <a href="/">Upload</a>
+    <a href="/access/">Retrieve</a>
+    <button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle dark mode">
+      <span id="themeIcon">🌙</span>
+    </button>
+  </nav>
+</header>
+
+<main class="main">
+  {% block content %}{% endblock %}
+</main>
+
+<script>
+  // Theme init (before paint to avoid flash)
+  (function() {
+    var saved = localStorage.getItem('codedrop-theme') || 'light';
+    document.documentElement.setAttribute('data-theme', saved);
+    document.getElementById('themeIcon').textContent = saved === 'dark' ? '☀️' : '🌙';
+  })();
+
+  document.getElementById('themeToggle').addEventListener('click', function() {
+    var html = document.documentElement;
+    var current = html.getAttribute('data-theme');
+    var next = current === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    localStorage.setItem('codedrop-theme', next);
+    document.getElementById('themeIcon').textContent = next === 'dark' ? '☀️' : '🌙';
+  });
+</script>
+
+{% block extra_js %}{% endblock %}
+</body>
+</html>
