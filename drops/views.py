@@ -27,6 +27,27 @@ cloudinary.config(
     secure=True,
 )
 
+# ---------------------------------------------------------------------------
+# File size limits (bytes)
+# ---------------------------------------------------------------------------
+
+MAX_SIZE_IMAGE    = 25 * 1024 * 1024   # 25 MB
+MAX_SIZE_VIDEO    = 100 * 1024 * 1024  # 100 MB
+MAX_SIZE_DEFAULT  = 25 * 1024 * 1024   # 25 MB for pdf, audio, archive, document, other
+
+def get_max_size(file_type):
+    if file_type == 'video':
+        return MAX_SIZE_VIDEO
+    return MAX_SIZE_DEFAULT  # covers image, pdf, audio, archive, document, other
+
+
+def human_readable(size_bytes):
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_bytes < 1024:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f} TB"
+
 
 # ---------------------------------------------------------------------------
 # Pages
@@ -64,10 +85,6 @@ def upload(request):
     else:
         code = generate_unique_code(use_words=True)
 
-    # Create the CodeDrop record
-    # drop = CodeDrop(code=code)
-    # drop.set_password(password if password else None)
-    # drop.save()
     from datetime import timedelta
     from django.utils import timezone
 
@@ -76,19 +93,10 @@ def upload(request):
     if expiry_days == '0':
         expires_at = None
     else:
-        expires_at = timezone.now() + timedelta(
-            days=int(expiry_days)
-        )
+        expires_at = timezone.now() + timedelta(days=int(expiry_days))
 
-    drop = CodeDrop(
-        code=code,
-        expires_at=expires_at
-    )
-
-    drop.set_password(
-        password if password else None
-    )
-
+    drop = CodeDrop(code=code, expires_at=expires_at)
+    drop.set_password(password if password else None)
     drop.save()
 
     uploaded = []
@@ -98,17 +106,26 @@ def upload(request):
         mime_type = f.content_type or (mimetypes.guess_type(f.name)[0] or '')
         file_type = DroppedFile.detect_file_type(mime_type, f.name)
 
+        # ── Size validation ──────────────────────────────────────────────
+        max_size = get_max_size(file_type)
+        if f.size > max_size:
+            errors.append({
+                'filename': f.name,
+                'error': (
+                    f"File size {human_readable(f.size)} exceeds the "
+                    f"{human_readable(max_size)} limit for {file_type} files."
+                )
+            })
+            continue
+        # ────────────────────────────────────────────────────────────────
+
         try:
-            # Determine Cloudinary resource_type
             if file_type == 'image':
                 resource_type = 'image'
-
             elif file_type == 'video':
                 resource_type = 'video'
-
             elif file_type == 'pdf':
                 resource_type = 'image'   # IMPORTANT
-
             else:
                 resource_type = 'raw'
 
@@ -143,7 +160,6 @@ def upload(request):
         drop.delete()
         return JsonResponse({'error': 'All file uploads failed.', 'details': errors}, status=500)
 
-    # Build the access URL and QR code
     access_url = request.build_absolute_uri(f'/access/{code}/')
     qr_data_uri = generate_qr_base64(access_url)
 
@@ -224,7 +240,6 @@ def download_zip(request, code):
     if not files:
         return HttpResponse('No files in this drop.', status=404)
 
-    # Increment download count
     drop.download_count += 1
     drop.save(update_fields=['download_count'])
 
@@ -235,53 +250,29 @@ def download_zip(request, code):
     response['Content-Length'] = len(zip_bytes)
     return response
 
-import requests
-from requests.auth import HTTPBasicAuth
-from django.http import HttpResponse
 
+# ---------------------------------------------------------------------------
+# API: Download single file
+# ---------------------------------------------------------------------------
 
 @csrf_exempt
 @require_http_methods(["GET"])
 def download_file(request, code, file_id):
-
-    drop = get_object_or_404(
-        CodeDrop,
-        code=code.upper()
-    )
-
-    file = get_object_or_404(
-        DroppedFile,
-        id=file_id,
-        drop=drop
-    )
+    drop = get_object_or_404(CodeDrop, code=code.upper())
+    file = get_object_or_404(DroppedFile, id=file_id, drop=drop)
 
     try:
-        response = requests.get(
-            file.cloudinary_url,
-            timeout=30
-        )
+        response = requests.get(file.cloudinary_url, timeout=30)
 
         if response.status_code != 200:
-            return HttpResponse(
-                "Could not fetch file from Cloudinary.",
-                status=500
-            )
+            return HttpResponse("Could not fetch file from Cloudinary.", status=500)
 
-        django_response = HttpResponse(
-            response.content,
-            content_type=file.mime_type
-        )
-
+        django_response = HttpResponse(response.content, content_type=file.mime_type)
         django_response["Content-Disposition"] = (
             f'attachment; filename="{file.original_filename}"'
         )
-
         return django_response
 
     except Exception as e:
         print("DOWNLOAD ERROR:", str(e))
-
-        return HttpResponse(
-            f"Download failed: {str(e)}",
-            status=500
-        )
+        return HttpResponse(f"Download failed: {str(e)}", status=500)

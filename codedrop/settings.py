@@ -144,8 +144,8 @@ CLOUDINARY_STORAGE = {
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.RawMediaCloudinaryStorage'
 
 # File upload
-FILE_UPLOAD_MAX_MEMORY_SIZE = 104857600   # 100 MB
-DATA_UPLOAD_MAX_MEMORY_SIZE = 104857600
+FILE_UPLOAD_MAX_MEMORY_SIZE = 104857600    # 100 MB — Django buffer (handles video too)
+DATA_UPLOAD_MAX_MEMORY_SIZE = 104857600    # keep same, per-file validation is in views.py
 
 # Security for production
 SECURE_BROWSER_XSS_FILTER = True

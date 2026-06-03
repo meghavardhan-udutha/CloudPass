@@ -1,4 +1,4 @@
-# CodeDrop
+# CloudPass
 
 Share files instantly with a short access code. No login needed.
 
